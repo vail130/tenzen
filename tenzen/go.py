@@ -24,7 +24,11 @@ class Color(Enum):
 
 
 class Point(object):
-    def __init__(self):
+    def __init__(self, x, y, board):
+        self.x = x
+        self.y = y
+        self.board = board
+
         self.is_occupied = False
         self.color = None
 
@@ -35,17 +39,51 @@ class Point(object):
         self.is_occupied = True
         self.color = color
 
-    def __str__(self):
-        if self.is_occupied:
-            return 'b' if self.color == Color.black else 'w'
+    def clear(self):
+        if not self.is_occupied:
+            raise ValueError()
 
-        return '.'
+        self.is_occupied = False
+        self.color = None
+
+    @property
+    def surrounding_points(self):
+        x, y = self.x, self.y
+        potential_surrounding_points = [
+            (x + 1, y),
+            (x - 1, y),
+            (x, y + 1),
+            (x, y - 1),
+        ]
+
+        surrounding_points = []
+        for xp, yp in potential_surrounding_points:
+            if not (0 <= xp < len(self.board.points)):
+                continue
+            if not (0 <= yp < len(self.board.points[xp])):
+                continue
+            surrounding_points.append(self.board.points[xp][yp])
+
+        return surrounding_points
+
+    @property
+    def is_captured(self):
+        return all([p.is_occupied and p.color != self.color
+                    for p in self.surrounding_points])
+
+    @property
+    def liberties(self):
+        return [p for p in self.surrounding_points if not p.is_occupied]
+
+    def __str__(self):
+        # TODO: Represent territory with lowercase letter
+        return self.color.name[0].upper() if self.is_occupied else '.'
 
 
 class Board(object):
     def __init__(self, dimension):
         self.dimension = dimension
-        self.points = [[Point() for _ in range(dimension)] for _ in range(dimension)]
+        self.points = [[Point(x, y, self) for y in range(dimension)] for x in range(dimension)]
 
     def is_complete(self):
         return all([p.is_occupied for row in self.points for p in row])
@@ -56,6 +94,14 @@ class Board(object):
             self.points[x][y].fill(color)
         except IndexError:
             raise ValueError('[%s,%s] are invalid coordinates' % (x, y))
+
+    def remove_captured_stones(self, color):
+        # TODO: Remove captured stone groups
+
+        for row in self.points:
+            for point in row:
+                if point.is_occupied and point.color == color and point.is_captured:
+                    point.clear()
 
     def __str__(self):
         transposed_points = zip(*self.points)
@@ -77,7 +123,7 @@ class Game(object):
         if not (MIN_BOARD_DIMENSION <= self.board_dimension <= MAX_BOARD_DIMENSION):
             raise ValueError('Board dimension must be from %s to %s.' % (MIN_BOARD_DIMENSION, MAX_BOARD_DIMENSION))
 
-        self.turn = Color.black
+        self.turn_color = Color.black
         self.board = None
         self.last_player_passed = False
 
@@ -87,10 +133,13 @@ class Game(object):
         self._end()
 
     def _setup(self):
-        print("Let's play! User is %s and computer is %s on a %sx%s board." % (self.user_color.name,
-                                                                               self.computer_color.name,
-                                                                               self.board_dimension,
-                                                                               self.board_dimension))
+        print('\n'.join([
+            '',
+            "Let's play! You're %s and the computer is %s on a %sx%s board." % (self.user_color.name,
+                                                                                self.computer_color.name,
+                                                                                self.board_dimension,
+                                                                                self.board_dimension),
+        ]))
         self.board = Board(dimension=self.board_dimension)
 
     def _run(self):
@@ -112,7 +161,7 @@ class Game(object):
 
     def _do_turn(self):
         try:
-            if self.turn == self.user_color:
+            if self.turn_color == self.user_color:
                 self._place_user_stone()
             else:
                 self._place_computer_stone()
@@ -122,8 +171,11 @@ class Game(object):
             else:
                 self.last_player_passed = True
 
-        self._remove_opponent_stones_without_liberties()
-        self._remove_own_stones_without_liberties()
+        self._remove_opponent_captured_stones()
+        self._remove_player_captured_stones()
+
+        # TODO: Prevent previous board state
+
         self._change_turn()
 
     def _place_user_stone(self):
@@ -152,7 +204,7 @@ class Game(object):
 
                 x = ord(coord_str[0]) - ord('A')
                 y = int(''.join(coord_str[1:])) - 1
-                self.board.add_piece(coordinates=[x, y], color=self.turn)
+                self.board.add_piece(coordinates=[x, y], color=self.turn_color)
             except ValueError:
                 pass
             else:
@@ -162,11 +214,11 @@ class Game(object):
         if self.board.is_complete():
             raise PassTurn()
 
-        # TODO
+        # TODO: Magic
         for y in range(self.board_dimension):
             for x in range(self.board_dimension):
                 try:
-                    self.board.add_piece(coordinates=[x, y], color=self.turn)
+                    self.board.add_piece(coordinates=[x, y], color=self.turn_color)
                 except ValueError:
                     pass
                 else:
@@ -174,16 +226,17 @@ class Game(object):
 
         raise PassTurn()
 
-    def _remove_opponent_stones_without_liberties(self):
-        # TODO
-        pass
+    def _remove_opponent_captured_stones(self):
+        self.board.remove_captured_stones(color=self._get_opponent_color())
 
-    def _remove_own_stones_without_liberties(self):
-        # TODO
-        pass
+    def _remove_player_captured_stones(self):
+        self.board.remove_captured_stones(color=self.turn_color)
 
     def _change_turn(self):
-        self.turn = Color.black if self.turn == Color.white else Color.white
+        self.turn_color = self._get_opponent_color()
+
+    def _get_opponent_color(self):
+        return Color.black if self.turn_color == Color.white else Color.white
 
 
 if __name__ == '__main__':
