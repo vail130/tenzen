@@ -1,13 +1,21 @@
 from __future__ import absolute_import, unicode_literals, print_function
 
 import argparse
-
 import re
+
 from enum import Enum
 
 BOARD_DIMENSION = 19
 MIN_BOARD_DIMENSION = 5
 MAX_BOARD_DIMENSION = 19
+
+
+class PassTurn(Exception):
+    pass
+
+
+class GameOver(Exception):
+    pass
 
 
 class Color(Enum):
@@ -55,7 +63,7 @@ class Board(object):
         return '\n'.join(
             [' '.join(a_z)] +
             [' '.join(
-                [str(j+1) if j+1 > 9 else str(' %s' % (j+1))] + [str(p) for p in row]
+                [str(j + 1) if j + 1 > 9 else str(' %s' % (j + 1))] + [str(p) for p in row]
             ) for j, row in enumerate(transposed_points)]
         )
 
@@ -71,10 +79,12 @@ class Game(object):
 
         self.turn = Color.black
         self.board = None
+        self.last_player_passed = False
 
     def play(self):
         self._setup()
         self._run()
+        self._end()
 
     def _setup(self):
         print("Let's play! User is %s and computer is %s on a %sx%s board." % (self.user_color.name,
@@ -84,17 +94,39 @@ class Game(object):
         self.board = Board(dimension=self.board_dimension)
 
     def _run(self):
-        while not self.board.is_complete():
-            self._do_turn()
+        try:
+            while True:
+                self._do_turn()
+        except GameOver:
+            pass
+
+    def _end(self):
+        # TODO
+        print('\n'.join([
+            '',
+            'The game has ended:',
+            '',
+            str(self.board),
+            '',
+        ]))
 
     def _do_turn(self):
-        if self.turn == self.user_color:
-            self._do_user_turn()
-        else:
-            self._do_computer_turn()
+        try:
+            if self.turn == self.user_color:
+                self._place_user_stone()
+            else:
+                self._place_computer_stone()
+        except PassTurn:
+            if self.last_player_passed:
+                raise GameOver()
+            else:
+                self.last_player_passed = True
+
+        self._remove_opponent_stones_without_liberties()
+        self._remove_own_stones_without_liberties()
         self._change_turn()
 
-    def _do_user_turn(self):
+    def _place_user_stone(self):
         print('\n'.join([
             '',
             'Current board:',
@@ -108,9 +140,12 @@ class Game(object):
         turn_has_played = False
         while not turn_has_played:
             try:
-                coord_str = raw_input('(Something like A1 or F12) > ')
+                coord_str = raw_input('(Something like A1 or F12, or PASS to pass) > ')
                 coord_str = coord_str.upper()
                 coord_str = re.sub(r'[^A-Z0-9]', '', coord_str)
+
+                if coord_str == 'PASS':
+                    raise PassTurn()
 
                 if not (1 < len(coord_str) < 4):
                     raise ValueError('Invalid input: %s' % coord_str)
@@ -123,7 +158,11 @@ class Game(object):
             else:
                 turn_has_played = True
 
-    def _do_computer_turn(self):
+    def _place_computer_stone(self):
+        if self.board.is_complete():
+            raise PassTurn()
+
+        # TODO
         for y in range(self.board_dimension):
             for x in range(self.board_dimension):
                 try:
@@ -132,6 +171,16 @@ class Game(object):
                     pass
                 else:
                     return
+
+        raise PassTurn()
+
+    def _remove_opponent_stones_without_liberties(self):
+        # TODO
+        pass
+
+    def _remove_own_stones_without_liberties(self):
+        # TODO
+        pass
 
     def _change_turn(self):
         self.turn = Color.black if self.turn == Color.white else Color.white
