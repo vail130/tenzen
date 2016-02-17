@@ -4,4 +4,7 @@ install:
 test:
 	nosetests $$suite
 
+play:
+	python tenzen/go.py
+
 .PHONY: test
