@@ -44,7 +44,10 @@ class Board(object):
 
     def add_piece(self, coordinates, color):
         x, y = coordinates
-        self.points[x][y].fill(color)
+        try:
+            self.points[x][y].fill(color)
+        except IndexError:
+            raise ValueError('[%s,%s] are invalid coordinates' % (x, y))
 
     def __str__(self):
         transposed_points = zip(*self.points)
@@ -63,8 +66,8 @@ class Game(object):
         self.computer_color = Color.black if self.user_color == Color.white else Color.white
         self.board_dimension = board_dimension
 
-        if self.board_dimension < MIN_BOARD_DIMENSION or self.board_dimension > MAX_BOARD_DIMENSION:
-            raise ValueError('Board dimension must be from 5 to 19.')
+        if not (MIN_BOARD_DIMENSION <= self.board_dimension <= MAX_BOARD_DIMENSION):
+            raise ValueError('Board dimension must be from %s to %s.' % (MIN_BOARD_DIMENSION, MAX_BOARD_DIMENSION))
 
         self.turn = Color.black
         self.board = None
@@ -102,15 +105,23 @@ class Game(object):
             '',
         ]))
 
-        coord_str = raw_input('(Something like A1 or F12) > ')
-        coord_str = coord_str.upper()
-        coord_str = re.sub(r'[^A-Z0-9]', '', coord_str)
+        turn_has_played = False
+        while not turn_has_played:
+            try:
+                coord_str = raw_input('(Something like A1 or F12) > ')
+                coord_str = coord_str.upper()
+                coord_str = re.sub(r'[^A-Z0-9]', '', coord_str)
 
-        if len(coord_str) < 2 or len(coord_str) > 3:
-            raise ValueError('Invalid input')
+                if not (1 < len(coord_str) < 4):
+                    raise ValueError('Invalid input: %s' % coord_str)
 
-        coordinates = [ord(coord_str[0]) - ord('A'), int(''.join(coord_str[1:])) - 1]
-        self.board.add_piece(coordinates=coordinates, color=self.turn)
+                x = ord(coord_str[0]) - ord('A')
+                y = int(''.join(coord_str[1:])) - 1
+                self.board.add_piece(coordinates=[x, y], color=self.turn)
+            except ValueError:
+                pass
+            else:
+                turn_has_played = True
 
     def _do_computer_turn(self):
         for y in range(self.board_dimension):
