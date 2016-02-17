@@ -47,37 +47,74 @@ class Point(object):
         self.color = None
 
     @property
-    def surrounding_points(self):
+    def adjacent_points(self):
         x, y = self.x, self.y
-        potential_surrounding_points = [
+        potential_adjacent_points = [
             (x + 1, y),
             (x - 1, y),
             (x, y + 1),
             (x, y - 1),
         ]
 
-        surrounding_points = []
-        for xp, yp in potential_surrounding_points:
+        adjacent_points = []
+        for xp, yp in potential_adjacent_points:
             if not (0 <= xp < len(self.board.points)):
                 continue
             if not (0 <= yp < len(self.board.points[xp])):
                 continue
-            surrounding_points.append(self.board.points[xp][yp])
+            adjacent_points.append(self.board.points[xp][yp])
 
-        return surrounding_points
+        return adjacent_points
 
     @property
     def is_captured(self):
-        return all([p.is_occupied and p.color != self.color
-                    for p in self.surrounding_points])
+        return all(p.is_occupied and p.color != self.color
+                   for p in self.adjacent_points)
+
+    @property
+    def connections(self):
+        return [p for p in self.adjacent_points if p.color == self.color]
 
     @property
     def liberties(self):
-        return [p for p in self.surrounding_points if not p.is_occupied]
+        return [p for p in self.adjacent_points if not p.is_occupied]
 
     def __str__(self):
         # TODO: Represent territory with lowercase letter
         return self.color.name[0].upper() if self.is_occupied else '.'
+
+
+class Group(object):
+    def __init__(self, point):
+        self.points = [point]
+        self.color = point.color
+        self.coordinates = {(point.x, point.y)}
+
+        for p in self.points:
+            self._find_connections(p)
+
+    def _find_connections(self, point):
+        for conn in point.connections:
+            if (conn.x, conn.y) not in self.coordinates:
+                self.coordinates.add((conn.x, conn.y))
+                self.points.append(conn)
+                self._find_connections(conn)
+
+    @property
+    def is_captured(self):
+        group_and_adjacent_points = []
+        for p in self.points:
+            group_and_adjacent_points += p.adjacent_points
+
+        adjacent_points = [p
+                           for p in group_and_adjacent_points
+                           if (p.x, p.y) not in self.coordinates]
+
+        return all(p.is_occupied and p.color != self.color for p in adjacent_points)
+
+    def clear(self):
+        for p in self.points:
+            p.clear()
 
 
 class Board(object):
@@ -86,7 +123,7 @@ class Board(object):
         self.points = [[Point(x, y, self) for y in range(dimension)] for x in range(dimension)]
 
     def is_complete(self):
-        return all([p.is_occupied for row in self.points for p in row])
+        return all(p.is_occupied for row in self.points for p in row)
 
     def add_piece(self, coordinates, color):
         x, y = coordinates
@@ -96,8 +133,20 @@ class Board(object):
             raise ValueError('[%s,%s] are invalid coordinates' % (x, y))
 
     def remove_captured_stones(self, color):
-        # TODO: Remove captured stone groups
+        self._remove_captured_groups(color)
+        self._remove_captured_individuals(color)
 
+    def _remove_captured_groups(self, color):
+        covered_coordinates = set()
+        for row in self.points:
+            for point in row:
+                if point.is_occupied and point.color == color and (point.x, point.y) not in covered_coordinates:
+                    group = Group(point)
+                    if group.is_captured:
+                        group.clear()
+                    covered_coordinates |= group.coordinates
+
+    def _remove_captured_individuals(self, color):
         for row in self.points:
             for point in row:
                 if point.is_occupied and point.color == color and point.is_captured:
@@ -150,7 +199,7 @@ class Game(object):
             pass
 
     def _end(self):
-        # TODO
+        # TODO: Determine winner by territory
         print('\n'.join([
             '',
             'The game has ended:',
