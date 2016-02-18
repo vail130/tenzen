@@ -1,3 +1,5 @@
+PYTHON=PYTHONPATH=$${PWD} python
+
 install:
 	pip install -r requirements.txt
 
@@ -5,12 +7,12 @@ test:
 	nosetests $$suite
 
 play:
-	python tenzen/go.py
+	$(PYTHON) tenzen/game.py
 
 play-test:
-	python tenzen/go.py --test
+	$(PYTHON) tenzen/game.py --test
 
 sim:
-	python tenzen/go.py --simulation
+	$(PYTHON) tenzen/game.py --simulation
 
 .PHONY: test

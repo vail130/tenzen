@@ -1,257 +1,17 @@
 from __future__ import absolute_import, unicode_literals, print_function
 
 import argparse
-import hashlib
 import re
 from operator import itemgetter
 
-from enum import Enum
-
-BOARD_DIMENSION = 19
-MIN_BOARD_DIMENSION = 5
-MAX_BOARD_DIMENSION = 19
-
-
-class SuperKo(Exception):
-    pass
+from tenzen.board import Board
+from tenzen.colors import Color
+from tenzen.computer_player import ComputerPlayer
+from tenzen.constants import BOARD_DIMENSION, MIN_BOARD_DIMENSION, MAX_BOARD_DIMENSION
+from tenzen.exceptions import SuperKo, PassTurn, GameOver
 
 
-class PassTurn(Exception):
-    pass
-
-
-class GameOver(Exception):
-    pass
-
-
-class Color(Enum):
-    black = 1
-    white = 2
-
-
-class Point(object):
-    def __init__(self, x, y, board):
-        self.x = x
-        self.y = y
-        self.board = board
-
-        self.is_occupied = False
-        self.color = None
-        self.territory_color = None
-
-    def fill(self, color):
-        if self.is_occupied:
-            raise ValueError()
-
-        self.is_occupied = True
-        self.color = color
-
-    def clear(self):
-        if not self.is_occupied:
-            raise ValueError()
-
-        self.is_occupied = False
-        self.color = None
-
-    @property
-    def adjacent_points(self):
-        x, y = self.x, self.y
-        potential_adjacent_points = [
-            (x + 1, y),
-            (x - 1, y),
-            (x, y + 1),
-            (x, y - 1),
-        ]
-
-        adjacent_points = []
-        for xp, yp in potential_adjacent_points:
-            if not (0 <= xp < len(self.board.points)):
-                continue
-            if not (0 <= yp < len(self.board.points[xp])):
-                continue
-            adjacent_points.append(self.board.points[xp][yp])
-
-        return adjacent_points
-
-    @property
-    def is_captured(self):
-        return all(p.is_occupied and p.color != self.color
-                   for p in self.adjacent_points)
-
-    @property
-    def connections(self):
-        return [p for p in self.adjacent_points if p.color == self.color]
-
-    @property
-    def liberties(self):
-        return [p for p in self.adjacent_points if not p.is_occupied]
-
-    def calculate_territory_color(self):
-        if not self.is_occupied:
-            self.territory_color = Group(point=self).capturing_color
-
-    def clone(self, board):
-        clone = self.__class__(self.x, self.y, board)
-        clone.is_occupied = self.is_occupied
-        clone.color = self.color
-        clone.territory_color = self.territory_color
-        return clone
-
-    def __str__(self):
-        if self.is_occupied:
-            return self.color.name[0].upper()
-
-        if self.territory_color is not None:
-            return self.territory_color.name[0].lower()
-
-        return '.'
-
-
-class Group(object):
-    def __init__(self, point):
-        self.points = [point]
-        self.color = point.color
-        self.coordinates = {(point.x, point.y)}
-
-        for p in self.points:
-            self._find_connections(p)
-
-    def _find_connections(self, point):
-        for conn in point.connections:
-            if (conn.x, conn.y) not in self.coordinates:
-                self.coordinates.add((conn.x, conn.y))
-                self.points.append(conn)
-                self._find_connections(conn)
-
-    @property
-    def adjacent_points(self):
-        group_and_adjacent_points = []
-        for p in self.points:
-            group_and_adjacent_points += p.adjacent_points
-
-        adjacent_points = [p
-                           for p in group_and_adjacent_points
-                           if (p.x, p.y) not in self.coordinates]
-
-        return adjacent_points
-
-    @property
-    def capturing_color(self):
-        adjacent_points = self.adjacent_points
-        if not adjacent_points:
-            return None
-
-        capturing_colors = {p.color for p in adjacent_points}
-        return adjacent_points[0].color if len(capturing_colors) == 1 else None
-
-    @property
-    def is_captured(self):
-        return self.capturing_color is not None
-
-    def clear(self):
-        for p in self.points:
-            p.clear()
-
-
-class Board(object):
-    def __init__(self, dimension):
-        self.dimension = dimension
-        self.points = [[Point(x, y, self) for y in range(dimension)] for x in range(dimension)]
-
-    def clone(self):
-        clone = self.__class__(self.dimension)
-        for row in self.points:
-            for p in row:
-                clone.points[p.x][p.y] = p.clone(board=clone)
-        return clone
-
-    def get_state(self):
-        return hashlib.md5(str(self)).digest()
-
-    def is_complete(self):
-        return all(p.is_occupied for row in self.points for p in row)
-
-    def add_piece(self, coordinates, color):
-        x, y = coordinates
-        try:
-            self.points[x][y].fill(color)
-        except IndexError:
-            raise ValueError('[%s,%s] are invalid coordinates' % (x, y))
-
-    def remove_captured_stones(self, color):
-        self._remove_captured_groups(color)
-        self._remove_captured_individuals(color)
-
-    def _remove_captured_groups(self, color):
-        covered_coordinates = set()
-        for row in self.points:
-            for point in row:
-                if point.is_occupied and point.color == color and (point.x, point.y) not in covered_coordinates:
-                    group = Group(point)
-                    if group.is_captured:
-                        group.clear()
-                    covered_coordinates |= group.coordinates
-
-    def _remove_captured_individuals(self, color):
-        for row in self.points:
-            for point in row:
-                if point.is_occupied and point.color == color and point.is_captured:
-                    point.clear()
-
-    def calculate_territories(self):
-        territory_counts = {
-            Color.black: 0,
-            Color.white: 0,
-        }
-
-        for row in self.points:
-            for point in row:
-                point.calculate_territory_color()
-                if point.territory_color:
-                    territory_counts[point.territory_color] += 1
-
-        return territory_counts
-
-    def __str__(self):
-        transposed_points = zip(*self.points)
-        a_z = ' '.join([str('  ')] + [str(unichr(ord('A') + i)) for i in range(self.dimension)])
-
-        def format_number(n):
-            return str(n) if n > 9 else str(' %s' % n)
-
-        return '\n'.join(
-            [a_z] +
-            [' '.join(
-                [format_number(j + 1)] + [str(p) for p in row]
-            ) for j, row in enumerate(transposed_points)]
-        )
-
-
-class ComputerPlayer(object):
-    def __init__(self, color, board, invalid_moves):
-        self.color = color
-        self.board = board
-        self.invalid_moves = invalid_moves
-
-    def play(self):
-        if self.board.is_complete():
-            raise PassTurn()
-
-        # TODO: Magic
-        for y in range(self.board.dimension):
-            for x in range(self.board.dimension):
-                if (x, y) not in self.invalid_moves:
-                    try:
-                        self.board.add_piece(coordinates=[x, y], color=self.color)
-                    except ValueError:
-                        pass
-                    else:
-                        return x, y
-
-        raise PassTurn()
-
-
-class Game(object):
+class BaseGame(object):
     def __init__(self, board_dimension=BOARD_DIMENSION):
         self.board_dimension = board_dimension
 
@@ -356,7 +116,20 @@ class Game(object):
         return Color.black if self.turn_color == Color.white else Color.white
 
 
-class UserGame(Game):
+class SimulatedGame(BaseGame):
+    def _do_turn(self):
+        super(SimulatedGame, self)._do_turn()
+
+        print('\n'.join([
+            '',
+            'Turn %s' % (len(self.past_boards) + 1),
+            '',
+            str(self.board),
+            '',
+        ]))
+
+
+class UserGame(BaseGame):
     def __init__(self, board_dimension=BOARD_DIMENSION, user_color='black', test_mode=False):
         super(UserGame, self).__init__(board_dimension)
 
@@ -438,19 +211,6 @@ class UserGame(Game):
                 pass
             else:
                 turn_has_played = True
-
-
-class SimulatedGame(Game):
-    def _do_turn(self):
-        super(SimulatedGame, self)._do_turn()
-
-        print('\n'.join([
-            '',
-            'Turn %s' % (len(self.past_boards) + 1),
-            '',
-            str(self.board),
-            '',
-        ]))
 
 
 if __name__ == '__main__':
