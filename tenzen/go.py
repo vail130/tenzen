@@ -227,6 +227,30 @@ class Board(object):
         )
 
 
+class ComputerPlayer(object):
+    def __init__(self, color, board, invalid_moves):
+        self.color = color
+        self.board = board
+        self.invalid_moves = invalid_moves
+
+    def play(self):
+        if self.board.is_complete():
+            raise PassTurn()
+
+        # TODO: Magic
+        for y in range(self.board.dimension):
+            for x in range(self.board.dimension):
+                if (x, y) not in self.invalid_moves:
+                    try:
+                        self.board.add_piece(coordinates=[x, y], color=self.color)
+                    except ValueError:
+                        pass
+                    else:
+                        return x, y
+
+        raise PassTurn()
+
+
 class Game(object):
     def __init__(self, board_dimension=BOARD_DIMENSION):
         self.board_dimension = board_dimension
@@ -306,30 +330,12 @@ class Game(object):
 
     def _place_stone(self):
         try:
-            self._place_computer_stone()
+            self.current_move = ComputerPlayer(self.turn_color, self.board, self.invalid_moves).play()
         except PassTurn:
             if self.last_player_passed:
                 raise GameOver()
             else:
                 self.last_player_passed = True
-
-    def _place_computer_stone(self):
-        if self.board.is_complete():
-            raise PassTurn()
-
-        # TODO: Magic
-        for y in range(self.board_dimension):
-            for x in range(self.board_dimension):
-                if (x, y) not in self.invalid_moves:
-                    try:
-                        self.board.add_piece(coordinates=[x, y], color=self.turn_color)
-                        self.current_move = (x, y)
-                    except ValueError:
-                        pass
-                    else:
-                        return
-
-        raise PassTurn()
 
     def _remove_opponent_captured_stones(self):
         self.board.remove_captured_stones(color=self._get_opponent_color())
@@ -373,7 +379,7 @@ class UserGame(Game):
             if self.turn_color == self.user_color:
                 self._place_user_stone()
             else:
-                self._place_computer_stone()
+                self.current_move = ComputerPlayer(self.turn_color, self.board, self.invalid_moves).play()
         except PassTurn:
             if self.last_player_passed:
                 raise GameOver()
@@ -421,7 +427,13 @@ class UserGame(Game):
 
                 x = ord(coord_str[0]) - ord('A')
                 y = int(''.join(coord_str[1:])) - 1
+
+                if (x, y) in self.invalid_moves:
+                    raise ValueError('That move is invalid, because it recreates a former board state. '
+                                     'Choose a different move.')
+
                 self.board.add_piece(coordinates=[x, y], color=self.turn_color)
+                self.current_move = (x, y)
             except ValueError:
                 pass
             else:
