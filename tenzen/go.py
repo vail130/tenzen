@@ -289,7 +289,6 @@ class Game(object):
                 '',
             ]))
 
-
     def _do_turn(self):
         self._setup_turn()
 
