@@ -263,8 +263,6 @@ class Game(object):
 
     def _end(self):
         territory_counts = self.board.calculate_territories()
-        winner_color = sorted(territory_counts.items(), key=itemgetter(1), reverse=True)[0][0]
-        win_margin = abs(territory_counts[Color.black] - territory_counts[Color.white])
 
         print('\n'.join([
             '',
@@ -274,10 +272,23 @@ class Game(object):
             '',
             'Black territory: %s' % territory_counts[Color.black],
             'White territory: %s' % territory_counts[Color.white],
-            '',
-            '%s wins by %s points!' % (winner_color.name.title(), win_margin),
-            '',
         ]))
+
+        win_margin = abs(territory_counts[Color.black] - territory_counts[Color.white])
+        if win_margin:
+            winner_color = sorted(territory_counts.items(), key=itemgetter(1), reverse=True)[0][0]
+            print('\n'.join([
+                '',
+                '%s wins by %s points!' % (winner_color.name.title(), win_margin),
+                '',
+            ]))
+        else:
+            print('\n'.join([
+                '',
+                'Black and White draw!',
+                '',
+            ]))
+
 
     def _do_turn(self):
         self._setup_turn()
