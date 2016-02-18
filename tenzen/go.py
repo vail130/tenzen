@@ -2,6 +2,7 @@ from __future__ import absolute_import, unicode_literals, print_function
 
 import argparse
 import re
+from operator import itemgetter
 
 from enum import Enum
 
@@ -31,6 +32,7 @@ class Point(object):
 
         self.is_occupied = False
         self.color = None
+        self.territory_color = None
 
     def fill(self, color):
         if self.is_occupied:
@@ -79,9 +81,18 @@ class Point(object):
     def liberties(self):
         return [p for p in self.adjacent_points if not p.is_occupied]
 
+    def calculate_territory_color(self):
+        if not self.is_occupied:
+            self.territory_color = Group(point=self).capturing_color
+
     def __str__(self):
-        # TODO: Represent territory with lowercase letter
-        return self.color.name[0].upper() if self.is_occupied else '.'
+        if self.is_occupied:
+            return self.color.name[0].upper()
+
+        if self.territory_color is not None:
+            return self.territory_color.name[0].lower()
+
+        return '.'
 
 
 class Group(object):
@@ -101,7 +112,7 @@ class Group(object):
                 self._find_connections(conn)
 
     @property
-    def is_captured(self):
+    def adjacent_points(self):
         group_and_adjacent_points = []
         for p in self.points:
             group_and_adjacent_points += p.adjacent_points
@@ -110,7 +121,20 @@ class Group(object):
                            for p in group_and_adjacent_points
                            if (p.x, p.y) not in self.coordinates]
 
-        return all(p.is_occupied and p.color != self.color for p in adjacent_points)
+        return adjacent_points
+
+    @property
+    def capturing_color(self):
+        adjacent_points = self.adjacent_points
+        if not adjacent_points:
+            return None
+
+        capturing_colors = {p.color for p in adjacent_points}
+        return adjacent_points[0].color if len(capturing_colors) == 1 else None
+
+    @property
+    def is_captured(self):
+        return self.capturing_color is not None
 
     def clear(self):
         for p in self.points:
@@ -152,22 +176,41 @@ class Board(object):
                 if point.is_occupied and point.color == color and point.is_captured:
                     point.clear()
 
+    def calculate_territories(self):
+        territory_counts = {
+            Color.black: 0,
+            Color.white: 0,
+        }
+
+        for row in self.points:
+            for point in row:
+                point.calculate_territory_color()
+                if point.territory_color:
+                    territory_counts[point.territory_color] += 1
+
+        return territory_counts
+
     def __str__(self):
         transposed_points = zip(*self.points)
-        a_z = [str('  ')] + [str(unichr(ord('A') + i)) for i in range(self.dimension)]
+        a_z = ' '.join([str('  ')] + [str(unichr(ord('A') + i)) for i in range(self.dimension)])
+
+        def format_number(n):
+            return str(n) if n > 9 else str(' %s' % n)
+
         return '\n'.join(
-            [' '.join(a_z)] +
+            [a_z] +
             [' '.join(
-                [str(j + 1) if j + 1 > 9 else str(' %s' % (j + 1))] + [str(p) for p in row]
+                [format_number(j + 1)] + [str(p) for p in row]
             ) for j, row in enumerate(transposed_points)]
         )
 
 
 class Game(object):
-    def __init__(self, user_color, board_dimension=BOARD_DIMENSION):
+    def __init__(self, user_color, board_dimension=BOARD_DIMENSION, test_mode=False):
         self.user_color = getattr(Color, user_color)
         self.computer_color = Color.black if self.user_color == Color.white else Color.white
         self.board_dimension = board_dimension
+        self.test_mode = test_mode
 
         if not (MIN_BOARD_DIMENSION <= self.board_dimension <= MAX_BOARD_DIMENSION):
             raise ValueError('Board dimension must be from %s to %s.' % (MIN_BOARD_DIMENSION, MAX_BOARD_DIMENSION))
@@ -199,12 +242,20 @@ class Game(object):
             pass
 
     def _end(self):
-        # TODO: Determine winner by territory
+        territory_counts = self.board.calculate_territories()
+        winner_color = sorted(territory_counts.items(), key=itemgetter(1), reverse=True)[0][0]
+        win_margin = abs(territory_counts[Color.black] - territory_counts[Color.white])
+
         print('\n'.join([
             '',
             'The game has ended:',
             '',
             str(self.board),
+            '',
+            'Black territory: %s' % territory_counts[Color.black],
+            'White territory: %s' % territory_counts[Color.white],
+            '',
+            '%s wins by %s points!' % (winner_color.name.title(), win_margin),
             '',
         ]))
 
@@ -247,6 +298,9 @@ class Game(object):
 
                 if coord_str == 'PASS':
                     raise PassTurn()
+
+                if self.test_mode and coord_str == 'END':
+                    raise GameOver()
 
                 if not (1 < len(coord_str) < 4):
                     raise ValueError('Invalid input: %s' % coord_str)
@@ -294,7 +348,9 @@ if __name__ == '__main__':
                         help='the color you want to be, default: black')
     parser.add_argument('-b', '--board', default=19, type=int,
                         help='dimension of the board, default: 19')
+    parser.add_argument('-t', '--test', action='store_const', const=True, default=False,
+                        help='dimension of the board, default: 19')
 
     args = parser.parse_args()
 
-    Game(user_color=args.color, board_dimension=args.board).play()
+    Game(user_color=args.color, board_dimension=args.board, test_mode=args.test).play()
