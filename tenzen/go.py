@@ -1,6 +1,7 @@
 from __future__ import absolute_import, unicode_literals, print_function
 
 import argparse
+import hashlib
 import re
 from operator import itemgetter
 
@@ -85,6 +86,13 @@ class Point(object):
         if not self.is_occupied:
             self.territory_color = Group(point=self).capturing_color
 
+    def clone(self, board):
+        clone = self.__class__(self.x, self.y, board)
+        clone.is_occupied = self.is_occupied
+        clone.color = self.color
+        clone.territory_color = self.territory_color
+        return clone
+
     def __str__(self):
         if self.is_occupied:
             return self.color.name[0].upper()
@@ -145,6 +153,16 @@ class Board(object):
     def __init__(self, dimension):
         self.dimension = dimension
         self.points = [[Point(x, y, self) for y in range(dimension)] for x in range(dimension)]
+
+    def clone(self):
+        clone = self.__class__(self.dimension)
+        for row in self.points:
+            for p in row:
+                clone.points[p.x][p.y] = p.clone(board=clone)
+        return clone
+
+    def get_state(self):
+        return hashlib.md5(str(self)).digest()
 
     def is_complete(self):
         return all(p.is_occupied for row in self.points for p in row)
@@ -217,6 +235,8 @@ class Game(object):
 
         self.turn_color = Color.black
         self.board = None
+        self.past_boards = []
+        self.board_states = set()
         self.last_player_passed = False
 
     def play(self):
@@ -260,6 +280,8 @@ class Game(object):
         ]))
 
     def _do_turn(self):
+        self._setup_turn()
+
         try:
             if self.turn_color == self.user_color:
                 self._place_user_stone()
@@ -274,9 +296,7 @@ class Game(object):
         self._remove_opponent_captured_stones()
         self._remove_player_captured_stones()
 
-        # TODO: Prevent previous board state
-
-        self._change_turn()
+        self._complete_turn()
 
     def _place_user_stone(self):
         print('\n'.join([
@@ -335,8 +355,21 @@ class Game(object):
     def _remove_player_captured_stones(self):
         self.board.remove_captured_stones(color=self.turn_color)
 
-    def _change_turn(self):
-        self.turn_color = self._get_opponent_color()
+    def _setup_turn(self):
+        self.past_boards.append(self.board.clone())
+
+    def _complete_turn(self):
+        new_board_state = self.board.get_state()
+        if new_board_state in self.board_states:
+            self.board = self.past_boards.pop(-1)
+            print('\n'.join([
+                '',
+                'That move is invalid, because it recreates a former board state. Choose a different move.',
+                '',
+            ]))
+        else:
+            self.board_states.add(new_board_state)
+            self.turn_color = self._get_opponent_color()
 
     def _get_opponent_color(self):
         return Color.black if self.turn_color == Color.white else Color.white
