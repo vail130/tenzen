@@ -10,4 +10,7 @@ play:
 play-test:
 	python tenzen/go.py --test
 
+sim:
+	python tenzen/go.py --simulation
+
 .PHONY: test

@@ -12,6 +12,10 @@ MIN_BOARD_DIMENSION = 5
 MAX_BOARD_DIMENSION = 19
 
 
+class SuperKo(Exception):
+    pass
+
+
 class PassTurn(Exception):
     pass
 
@@ -224,11 +228,8 @@ class Board(object):
 
 
 class Game(object):
-    def __init__(self, user_color, board_dimension=BOARD_DIMENSION, test_mode=False):
-        self.user_color = getattr(Color, user_color)
-        self.computer_color = Color.black if self.user_color == Color.white else Color.white
+    def __init__(self, board_dimension=BOARD_DIMENSION):
         self.board_dimension = board_dimension
-        self.test_mode = test_mode
 
         if not (MIN_BOARD_DIMENSION <= self.board_dimension <= MAX_BOARD_DIMENSION):
             raise ValueError('Board dimension must be from %s to %s.' % (MIN_BOARD_DIMENSION, MAX_BOARD_DIMENSION))
@@ -239,19 +240,15 @@ class Game(object):
         self.board_states = set()
         self.last_player_passed = False
 
+        self.invalid_moves = set()
+        self.current_move = None
+
     def play(self):
         self._setup()
         self._run()
         self._end()
 
     def _setup(self):
-        print('\n'.join([
-            '',
-            "Let's play! You're %s and the computer is %s on a %sx%s board." % (self.user_color.name,
-                                                                                self.computer_color.name,
-                                                                                self.board_dimension,
-                                                                                self.board_dimension),
-        ]))
         self.board = Board(dimension=self.board_dimension)
 
     def _run(self):
@@ -291,7 +288,87 @@ class Game(object):
 
     def _do_turn(self):
         self._setup_turn()
+        self._place_stone()
+        self._remove_opponent_captured_stones()
+        self._remove_player_captured_stones()
 
+        try:
+            self._complete_turn()
+        except SuperKo:
+            self.invalid_moves.add(self.current_move)
+        else:
+            self.invalid_moves = set()
+
+        self.current_move = None
+
+    def _setup_turn(self):
+        self.past_boards.append(self.board.clone())
+
+    def _place_stone(self):
+        try:
+            self._place_computer_stone()
+        except PassTurn:
+            if self.last_player_passed:
+                raise GameOver()
+            else:
+                self.last_player_passed = True
+
+    def _place_computer_stone(self):
+        if self.board.is_complete():
+            raise PassTurn()
+
+        # TODO: Magic
+        for y in range(self.board_dimension):
+            for x in range(self.board_dimension):
+                if (x, y) not in self.invalid_moves:
+                    try:
+                        self.board.add_piece(coordinates=[x, y], color=self.turn_color)
+                        self.current_move = (x, y)
+                    except ValueError:
+                        pass
+                    else:
+                        return
+
+        raise PassTurn()
+
+    def _remove_opponent_captured_stones(self):
+        self.board.remove_captured_stones(color=self._get_opponent_color())
+
+    def _remove_player_captured_stones(self):
+        self.board.remove_captured_stones(color=self.turn_color)
+
+    def _complete_turn(self):
+        new_board_state = self.board.get_state()
+        if new_board_state in self.board_states:
+            self.board = self.past_boards.pop(-1)
+            raise SuperKo()
+        else:
+            self.board_states.add(new_board_state)
+            self.turn_color = self._get_opponent_color()
+
+    def _get_opponent_color(self):
+        return Color.black if self.turn_color == Color.white else Color.white
+
+
+class UserGame(Game):
+    def __init__(self, board_dimension=BOARD_DIMENSION, user_color='black', test_mode=False):
+        super(UserGame, self).__init__(board_dimension)
+
+        self.user_color = getattr(Color, user_color)
+        self.computer_color = Color.black if self.user_color == Color.white else Color.white
+        self.test_mode = test_mode
+
+    def _setup(self):
+        super(UserGame, self)._setup()
+        print('\n'.join([
+            '',
+            "Let's play! You're %s and the computer is %s on a %sx%s board." % (self.user_color.name,
+                                                                                self.computer_color.name,
+                                                                                self.board_dimension,
+                                                                                self.board_dimension),
+        ]))
+
+    def _place_stone(self):
         try:
             if self.turn_color == self.user_color:
                 self._place_user_stone()
@@ -303,10 +380,17 @@ class Game(object):
             else:
                 self.last_player_passed = True
 
-        self._remove_opponent_captured_stones()
-        self._remove_player_captured_stones()
-
-        self._complete_turn()
+    def _complete_turn(self):
+        try:
+            super(UserGame, self)._complete_turn()
+        except SuperKo:
+            if self.turn_color == self.user_color:
+                print('\n'.join([
+                    '',
+                    'That move is invalid, because it recreates a former board state. Choose a different move.',
+                    '',
+                ]))
+            raise
 
     def _place_user_stone(self):
         print('\n'.join([
@@ -343,46 +427,18 @@ class Game(object):
             else:
                 turn_has_played = True
 
-    def _place_computer_stone(self):
-        if self.board.is_complete():
-            raise PassTurn()
 
-        # TODO: Magic
-        for y in range(self.board_dimension):
-            for x in range(self.board_dimension):
-                try:
-                    self.board.add_piece(coordinates=[x, y], color=self.turn_color)
-                except ValueError:
-                    pass
-                else:
-                    return
+class SimulatedGame(Game):
+    def _do_turn(self):
+        super(SimulatedGame, self)._do_turn()
 
-        raise PassTurn()
-
-    def _remove_opponent_captured_stones(self):
-        self.board.remove_captured_stones(color=self._get_opponent_color())
-
-    def _remove_player_captured_stones(self):
-        self.board.remove_captured_stones(color=self.turn_color)
-
-    def _setup_turn(self):
-        self.past_boards.append(self.board.clone())
-
-    def _complete_turn(self):
-        new_board_state = self.board.get_state()
-        if new_board_state in self.board_states:
-            self.board = self.past_boards.pop(-1)
-            print('\n'.join([
-                '',
-                'That move is invalid, because it recreates a former board state. Choose a different move.',
-                '',
-            ]))
-        else:
-            self.board_states.add(new_board_state)
-            self.turn_color = self._get_opponent_color()
-
-    def _get_opponent_color(self):
-        return Color.black if self.turn_color == Color.white else Color.white
+        print('\n'.join([
+            '',
+            'Turn %s' % (len(self.past_boards) + 1),
+            '',
+            str(self.board),
+            '',
+        ]))
 
 
 if __name__ == '__main__':
@@ -391,9 +447,14 @@ if __name__ == '__main__':
                         help='the color you want to be, default: black')
     parser.add_argument('-b', '--board', default=19, type=int,
                         help='dimension of the board, default: 19')
+    parser.add_argument('-s', '--simulation', action='store_const', const=True, default=False,
+                        help='simulation mode, default: False')
     parser.add_argument('-t', '--test', action='store_const', const=True, default=False,
-                        help='dimension of the board, default: 19')
+                        help='test mode, default: False')
 
     args = parser.parse_args()
 
-    Game(user_color=args.color, board_dimension=args.board, test_mode=args.test).play()
+    if args.simulation:
+        SimulatedGame(board_dimension=args.board).play()
+    else:
+        UserGame(user_color=args.color, board_dimension=args.board, test_mode=args.test).play()
