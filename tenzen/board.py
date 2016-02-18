@@ -12,6 +12,12 @@ class Board(object):
         self.dimension = dimension
         self._points = tuple(tuple(Point(x, y, self) for y in range(dimension)) for x in range(dimension))
 
+    @property
+    def points(self):
+        for y in range(self.dimension):
+            for x in range(self.dimension):
+                yield self._points[x][y]
+
     def clone(self):
         clone = self.__class__(self.dimension)
         clone._points = tuple(tuple(p.clone(board=clone) for p in row) for row in self._points)
@@ -21,14 +27,11 @@ class Board(object):
         return hashlib.md5(str(self)).digest()
 
     def is_complete(self):
-        return all(p.is_occupied for row in self._points for p in row)
+        return all(p.is_occupied for p in self.points)
 
     def get_point(self, coordinates):
         x, y = coordinates
-        try:
-            return self._points[x][y]
-        except IndexError:
-            return None
+        return self._points[x][y]
 
     def add_piece(self, coordinates, color):
         x, y = coordinates
@@ -43,19 +46,17 @@ class Board(object):
 
     def _remove_captured_groups(self, color):
         covered_coordinates = set()
-        for row in self._points:
-            for point in row:
-                if point.is_occupied and point.color == color and (point.x, point.y) not in covered_coordinates:
-                    group = Group(point)
-                    if group.is_captured:
-                        group.clear()
-                    covered_coordinates |= group.coordinates
+        for point in self.points:
+            if point.is_occupied and point.color == color and (point.x, point.y) not in covered_coordinates:
+                group = Group(points=[point])
+                if group.is_captured:
+                    group.clear()
+                covered_coordinates |= group.coordinates
 
     def _remove_captured_individuals(self, color):
-        for row in self._points:
-            for point in row:
-                if point.is_occupied and point.color == color and point.is_captured:
-                    point.clear()
+        for point in self.points:
+            if point.is_occupied and point.color == color and point.is_captured:
+                point.clear()
 
     def calculate_territories(self):
         territory_counts = {
@@ -63,11 +64,10 @@ class Board(object):
             Color.white: 0,
         }
 
-        for row in self._points:
-            for point in row:
-                point.calculate_territory_color()
-                if point.territory_color:
-                    territory_counts[point.territory_color] += 1
+        for point in self.points:
+            point.calculate_territory_color()
+            if point.territory_color:
+                territory_counts[point.territory_color] += 1
 
         return territory_counts
 

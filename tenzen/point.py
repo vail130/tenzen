@@ -37,12 +37,9 @@ class Point(object):
             (x, y - 1),
         ]
 
-        adjacent_points = []
-        for xp, yp in potential_adjacent_points:
-            point = self._board.get_point(coordinates=[xp, yp])
-            if point is not None:
-                adjacent_points.append(point)
-
+        adjacent_points = [self._board.get_point(coordinates=[xp, yp])
+                           for xp, yp in potential_adjacent_points
+                           if 0 <= xp < self._board.dimension and 0 <= yp < self._board.dimension]
         return adjacent_points
 
     @property
@@ -60,7 +57,7 @@ class Point(object):
 
     def calculate_territory_color(self):
         if not self.is_occupied:
-            self.territory_color = Group(point=self).capturing_color
+            self.territory_color = Group(points=[self]).capturing_color
 
     def clone(self, board):
         clone = self.__class__(self.x, self.y, board)

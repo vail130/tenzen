@@ -2,19 +2,45 @@ from __future__ import absolute_import, unicode_literals, print_function
 
 
 class Group(object):
-    def __init__(self, point):
-        self.points = [point]
-        self.color = point.color
-        self.coordinates = {(point.x, point.y)}
+    def __init__(self, points, auto_find=True):
+        self.points = points
+        self.color = points[0].color
+        self.coordinates = {(p.x, p.y) for p in points}
+
+        self.top = None
+        self.bottom = None
+        self.left = None
+        self.right = None
 
         for p in self.points:
-            self._find_connections(p)
+            if self.top is None or self.top.y > p.y:
+                self.top = p
+            if self.bottom is None or self.bottom.y < p.y:
+                self.bottom = p
+            if self.left is None or self.left.x > p.x:
+                self.left = p
+            if self.right is None or self.right.x < p.x:
+                self.right = p
+
+        if auto_find:
+            for p in self.points:
+                self._find_connections(p)
 
     def _find_connections(self, point):
         for conn in point.connections:
             if (conn.x, conn.y) not in self.coordinates:
                 self.coordinates.add((conn.x, conn.y))
                 self.points.append(conn)
+
+                if self.top.y > conn.y:
+                    self.top = conn
+                if self.bottom.y < conn.y:
+                    self.bottom = conn
+                if self.left.x > conn.x:
+                    self.left = conn
+                if self.right.x < conn.x:
+                    self.right = conn
+
                 self._find_connections(conn)
 
     @property
@@ -28,6 +54,12 @@ class Group(object):
                            if (p.x, p.y) not in self.coordinates]
 
         return adjacent_points
+
+    @property
+    def liberties(self):
+        return [p
+                for p in self.adjacent_points
+                if not p.is_occupied]
 
     @property
     def capturing_color(self):
