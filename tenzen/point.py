@@ -7,7 +7,7 @@ class Point(object):
     def __init__(self, x, y, board):
         self.x = x
         self.y = y
-        self.board = board
+        self._board = board
 
         self.is_occupied = False
         self.color = None
@@ -39,11 +39,9 @@ class Point(object):
 
         adjacent_points = []
         for xp, yp in potential_adjacent_points:
-            if not (0 <= xp < len(self.board.points)):
-                continue
-            if not (0 <= yp < len(self.board.points[xp])):
-                continue
-            adjacent_points.append(self.board.points[xp][yp])
+            point = self._board.get_point(coordinates=[xp, yp])
+            if point is not None:
+                adjacent_points.append(point)
 
         return adjacent_points
 

@@ -90,7 +90,7 @@ class BaseGame(object):
 
     def _place_stone(self):
         try:
-            self.current_move = ComputerPlayer(self.turn_color, self.board, self.invalid_moves).play()
+            self.current_move = ComputerPlayer(self.turn_color, self.board, tuple(self.invalid_moves)).play()
         except PassTurn:
             if self.last_player_passed:
                 raise GameOver()
@@ -152,7 +152,8 @@ class UserGame(BaseGame):
             if self.turn_color == self.user_color:
                 self._place_user_stone()
             else:
-                self.current_move = ComputerPlayer(self.turn_color, self.board, self.invalid_moves).play()
+                self.current_move = ComputerPlayer(self.turn_color, self.board,
+                                                   tuple(self.invalid_moves)).play()
         except PassTurn:
             if self.last_player_passed:
                 raise GameOver()
