@@ -13,6 +13,27 @@ class Point(object):
         self.color = None
         self.territory_color = None
 
+    def __repr__(self):
+        return '<tenzen.point.Point at (%s, %s) [%s]>' % (self.x, self.y, self.color)
+
+    def __str__(self):
+        if self.is_occupied:
+            return self.color.name[0].upper()
+
+        if self.territory_color is not None:
+            return self.territory_color.name[0].lower()
+
+        return '.'
+
+    def __eq__(self, other):
+        if not isinstance(other, Point):
+            return False
+
+        return (self.x == other.x
+                and self.y == other.y
+                and self.is_occupied == other.is_occupied
+                and self.color == other.color)
+
     def fill(self, color):
         if self.is_occupied:
             raise ValueError()
@@ -65,15 +86,3 @@ class Point(object):
         clone.color = self.color
         clone.territory_color = self.territory_color
         return clone
-
-    def __str__(self):
-        if self.is_occupied:
-            return self.color.name[0].upper()
-
-        if self.territory_color is not None:
-            return self.territory_color.name[0].lower()
-
-        return '.'
-
-    def __repr__(self):
-        return '<tenzen.point.Point at (%s, %s) [%s]>' % (self.x, self.y, self.color)

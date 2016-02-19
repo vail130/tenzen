@@ -1,30 +1,48 @@
 from __future__ import absolute_import, unicode_literals, print_function
 
+import logging
+import time
 from operator import itemgetter
 
 from tenzen.exceptions import PassTurn
 from tenzen.group import Group
 
+logging.basicConfig()
+log = logging.getLogger()
+log.setLevel(logging.INFO)
+
 
 class ComputerPlayer(object):
-    def __init__(self, board, past_boards, player_color, opponent_color, invalid_moves):
-        self._board = board
-        self._past_boards = past_boards
+    def __init__(self, player_color, opponent_color):
         self._player_color = player_color
         self._opponent_color = opponent_color
+
+        self._board = None
+        self._past_boards = None
+        self._invalid_moves = None
+
+        self._player_groups = None
+        self._territory_moves = {}
+        self._opponent_groups = None
+        self._capture_moves = {}
+
+    def play(self, board, past_boards, invalid_moves):
+        self._board = board
+        self._past_boards = past_boards
         self._invalid_moves = set(invalid_moves)
 
-    def play(self):
-        p = self.choose_point()
-        self._board.add_piece(coordinates=[p.x, p.y], color=self._player_color)
-        return p.x, p.y
+        return self.choose_point()
 
     def choose_point(self):
         potential_moves = self.get_initial_moves()
+        if potential_moves:
+            log.debug('Initial moves exist!')
+
         if not potential_moves:
             potential_moves = self.get_territory_moves() + self.get_capture_moves()
 
         if not potential_moves:
+            log.debug('Pass: No potential_moves')
             raise PassTurn()
 
         best_move_value = -1
@@ -38,29 +56,48 @@ class ComputerPlayer(object):
                 break
 
         if best_move_point is None or best_move_value < 0:
+            log.debug('Pass: %s %s %s', self._player_color, repr(best_move_point), best_move_value)
             raise PassTurn()
+
+        log.debug('Best Move: %s %s %s', self._player_color, repr(best_move_point), best_move_value)
 
         return best_move_point
 
     def get_initial_moves(self):
+        start = time.time()
+
         initial_moves = []
         if len(self._past_boards) < 10:
             initial_move = self._get_initial_move()
             if initial_move[0] > 0 and initial_move[1] is not None:
                 initial_moves.append(initial_move)
+
+        end = time.time()
+        log.debug('get_initial_moves took %s', (end - start))
         return initial_moves
 
     def get_territory_moves(self):
-        player_groups = self._get_groups_by_color(self._player_color)
-        potential_moves = [self._get_defensive_move_for_group(group) for group in player_groups]
-        potential_moves_with_needed_points = [t for t in potential_moves if t[1]]
-        return potential_moves_with_needed_points
+        start = time.time()
+
+        self._player_groups, updated = self._update_groups(self._player_groups, self._player_color)
+        if updated:
+            self._update_moves(self._player_groups, self._territory_moves, self._get_defensive_move_for_group)
+
+        end = time.time()
+        log.debug('get_territory_moves took %s', (end - start))
+        return self._territory_moves.values()
 
     def get_capture_moves(self):
-        opponent_groups = self._get_groups_by_color(self._opponent_color)
-        capturable_groups = [self._get_capturable_group(group) for group in opponent_groups]
-        capturable_groups_with_liberties = [g for g in capturable_groups if g[1]]
-        return capturable_groups_with_liberties
+        start = time.time()
+
+        self._opponent_groups, updated = self._update_groups(self._opponent_groups, self._opponent_color)
+        if updated:
+            self._update_moves(self._opponent_groups, self._capture_moves, self._get_capturable_group)
+
+        end = time.time()
+
+        log.debug('get_capture_moves took %s', (end - start))
+        return self._capture_moves.values()
 
     def _get_initial_move(self):
         z = int(round(self._board.dimension / 5.0))
@@ -78,17 +115,44 @@ class ComputerPlayer(object):
 
         for coords in starting_points:
             p = self._board.get_point(coordinates=coords)
-            if not p.is_occupied and p.color == self._opponent_color:
+            if p.is_occupied and p.color == self._opponent_color:
                 adjacent_points_with_player_stone = [ap
                                                      for ap in p.adjacent_points
                                                      if ap.is_occupied and ap.color == self._player_color]
                 liberties = p.liberties
                 if not adjacent_points_with_player_stone and liberties:
                     for liberty_point in liberties:
+                        # TODO: Choose liberty closer to walls
                         if (liberty_point.x, liberty_point.y) not in self._invalid_moves:
-                            return 5, liberty_point
+                            return 10, liberty_point
 
         return -1, None
+
+    def _update_groups(self, groups, color):
+        if groups is None:
+            groups = self._get_groups_by_color(color)
+            return groups, True
+        else:
+            return self._get_updated_groups(groups, color)
+
+    @staticmethod
+    def _update_moves(groups, moves_dict, move_function):
+        existing_states = set(moves_dict.keys())
+
+        updated_group_states = set()
+        for group in groups:
+            group_state = group.get_state()
+            updated_group_states.add(group_state)
+
+            if group_state not in moves_dict:
+                move = move_function(group)
+                if move[1] is not None:
+                    moves_dict[group_state] = move
+            else:
+                existing_states.remove(group_state)
+
+        for group_state in existing_states:
+            del moves_dict[group_state]
 
     def _get_groups_by_color(self, color):
         groups = []
@@ -99,6 +163,57 @@ class ComputerPlayer(object):
                 groups.append(group)
                 covered_coordinates |= group.coordinates
         return groups
+
+    def _get_updated_groups(self, groups, color):
+        previous_board = self._past_boards[-1]
+        changed_coords = {(p.x, p.y)
+                          for p in self._board.points
+                          if previous_board.get_point(coordinates=[p.x, p.y]) != p}
+
+        all_group_coords = set()
+        captured_group_indices = set()
+        updated_group_indices = set()
+        for i, group in enumerate(groups):
+            all_group_coords |= group.coordinates
+            group_changed_coords = group.coordinates & changed_coords
+            group_was_captured = len(group_changed_coords) == len(group.points)
+            if group_was_captured:
+                captured_group_indices.add(i)
+            elif group_changed_coords:
+                updated_group_indices.add(i)
+
+        new_groups = []
+        covered_coordinates = set(all_group_coords)
+        for point in self._board.points:
+            if point.is_occupied and point.color == color and (point.x, point.y) not in covered_coordinates:
+                group = Group(points=[point])
+                new_groups.append(group)
+                covered_coordinates |= group.coordinates
+
+        if not captured_group_indices and not updated_group_indices and not new_groups:
+            log.debug('No captured, changed or created groups with color %s', color)
+            return groups, False
+
+        updated_groups = []
+        if new_groups:
+            log.debug('New groups added!')
+            updated_groups += new_groups
+
+        if captured_group_indices or updated_group_indices:
+            log.debug('Groups captured/changed!')
+            for i, group in enumerate(groups):
+                if i not in captured_group_indices and i not in updated_group_indices:
+                    updated_groups.append(group)
+                elif i in updated_group_indices:
+                    covered_coordinates = set()
+                    for point in group.points:
+                        if point.is_occupied and point.color == color and (point.x, point.y) not in covered_coordinates:
+                            group = Group(points=[point])
+                            groups.append(group)
+                            covered_coordinates |= group.coordinates
+                            updated_groups.append(group)
+
+        return updated_groups, True
 
     def _get_capturable_group(self, group):
         group_liberties = group.liberties

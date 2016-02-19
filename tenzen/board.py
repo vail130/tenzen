@@ -14,8 +14,8 @@ class Board(object):
 
     @property
     def points(self):
-        for y in range(self.dimension):
-            for x in range(self.dimension):
+        for x in range(self.dimension):
+            for y in range(self.dimension):
                 yield self._points[x][y]
 
     def clone(self):
