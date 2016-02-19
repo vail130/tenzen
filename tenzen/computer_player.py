@@ -7,8 +7,9 @@ from tenzen.group import Group
 
 
 class ComputerPlayer(object):
-    def __init__(self, board, player_color, opponent_color, invalid_moves):
+    def __init__(self, board, past_boards, player_color, opponent_color, invalid_moves):
         self._board = board
+        self._past_boards = past_boards
         self._player_color = player_color
         self._opponent_color = opponent_color
         self._invalid_moves = set(invalid_moves)
@@ -19,73 +20,73 @@ class ComputerPlayer(object):
         return p.x, p.y
 
     def choose_point(self):
-        offense_value, offense_point = self.get_offensive_value_and_point()
-        defense_value, defense_point = self.get_defensive_value_and_point()
-
-        if offense_value < 0 and defense_point < 0:
-            raise PassTurn()
-
-        # Bias toward defense (establishing own territory)
-        return offense_point if offense_value > defense_point else defense_point
-
-    def get_offensive_value_and_point(self):
-        opponent_groups = self._get_groups_by_color(self._opponent_color)
-        capturable_groups = [self._get_capturable_group(group) for group in opponent_groups]
-
-        # Filter out capturable_groups without liberties
-        capturable_groups = [g for g in capturable_groups if g[1]]
-
-        if not capturable_groups:
-            return -1, None
-
-        best_offensive_moves = sorted(capturable_groups, key=itemgetter(0), reverse=True)
-        for value, point in best_offensive_moves:
-            if (point.x, point.y) not in self._invalid_moves:
-                return value, point
-
-        return -1, None
-
-    def get_defensive_value_and_point(self):
-        num_player_stones = len([p for p in self._board.points if p.is_occupied and p.color == self._player_color])
-        if num_player_stones < 5:
-            z = int(round(self._board.dimension / 5.0))
-            starting_points = [
-                (z, z),
-                (z, self._board.dimension - z),
-                (self._board.dimension - z, z),
-                (self._board.dimension - z, self._board.dimension - z)
-            ]
-
-            for coords in starting_points:
-                p = self._board.get_point(coordinates=coords)
-                if not p.is_occupied:
-                    return 10, p
-
-            for coords in starting_points:
-                p = self._board.get_point(coordinates=coords)
-                if not p.is_occupied and p.color == self._opponent_color:
-                    adjacent_points_with_player_stone = [ap
-                                                         for ap in p.adjacent_points
-                                                         if ap.is_occupied and ap.color == self._player_color]
-                    if not adjacent_points_with_player_stone and p.liberties:
-                        return 5, p.liberties[0]
-
-        player_groups = self._get_groups_by_color(self._player_color)
-        potential_moves = [self._get_defensive_move_for_group(group) for group in player_groups]
-
-        # Filter out potential_moves without needed points
-        potential_moves = [t for t in potential_moves if t[1]]
-
-        # TODO: Can I create any new groups to try to establish more territory?
-        pass
+        potential_moves = self.get_initial_moves()
+        if not potential_moves:
+            potential_moves = self.get_territory_moves() + self.get_capture_moves()
 
         if not potential_moves:
-            return -1, None
+            raise PassTurn()
 
-        best_defensive_moves = sorted(potential_moves, key=itemgetter(0), reverse=True)
-        for value, point in best_defensive_moves:
-            if (point.x, point.y) not in self._invalid_moves:
-                return value, point
+        best_move_value = -1
+        best_move_point = None
+
+        potential_moves = sorted(potential_moves, key=itemgetter(0), reverse=True)
+        for potential_move in potential_moves:
+            move_value, move_point = potential_move
+            if (move_point.x, move_point.y) not in self._invalid_moves:
+                best_move_value, best_move_point = potential_move
+                break
+
+        if best_move_point is None or best_move_value < 0:
+            raise PassTurn()
+
+        return best_move_point
+
+    def get_initial_moves(self):
+        initial_moves = []
+        if len(self._past_boards) < 10:
+            initial_move = self._get_initial_move()
+            if initial_move[0] > 0 and initial_move[1] is not None:
+                initial_moves.append(initial_move)
+        return initial_moves
+
+    def get_territory_moves(self):
+        player_groups = self._get_groups_by_color(self._player_color)
+        potential_moves = [self._get_defensive_move_for_group(group) for group in player_groups]
+        potential_moves_with_needed_points = [t for t in potential_moves if t[1]]
+        return potential_moves_with_needed_points
+
+    def get_capture_moves(self):
+        opponent_groups = self._get_groups_by_color(self._opponent_color)
+        capturable_groups = [self._get_capturable_group(group) for group in opponent_groups]
+        capturable_groups_with_liberties = [g for g in capturable_groups if g[1]]
+        return capturable_groups_with_liberties
+
+    def _get_initial_move(self):
+        z = int(round(self._board.dimension / 5.0))
+        starting_points = [
+            (z - 1, z - 1),
+            (z - 1, self._board.dimension - z),
+            (self._board.dimension - z, z - 1),
+            (self._board.dimension - z, self._board.dimension - z)
+        ]
+
+        for coords in starting_points:
+            p = self._board.get_point(coordinates=coords)
+            if not p.is_occupied:
+                return 10, p
+
+        for coords in starting_points:
+            p = self._board.get_point(coordinates=coords)
+            if not p.is_occupied and p.color == self._opponent_color:
+                adjacent_points_with_player_stone = [ap
+                                                     for ap in p.adjacent_points
+                                                     if ap.is_occupied and ap.color == self._player_color]
+                liberties = p.liberties
+                if not adjacent_points_with_player_stone and liberties:
+                    for liberty_point in liberties:
+                        if (liberty_point.x, liberty_point.y) not in self._invalid_moves:
+                            return 5, liberty_point
 
         return -1, None
 
@@ -104,8 +105,13 @@ class ComputerPlayer(object):
         group_size = len(group.points)
         capture_cost = len(group_liberties)
 
+        occupied_points = [1 for p in self._board.points if p.is_occupied]
+        percent_board_filled = float(sum(occupied_points)) / float(len(occupied_points)) if len(
+            occupied_points) > 0 else 0
+
         # TODO: Calculate the value better
-        capture_value = pow(group_size, 2) / pow(capture_cost, 2) if capture_cost > 0 else 0
+        capture_value = float(group_size) / float(
+            pow(capture_cost, 2)) * percent_board_filled if capture_cost > 0 else 0
 
         # TODO: Choose liberty better and factor into value
         return capture_value, group_liberties[0]
@@ -117,10 +123,15 @@ class ComputerPlayer(object):
             return -1, None
 
         territory_size = len(potential_territory)
-        territory_cost = len(points_needed)
+
+        occupied_points = [1 for p in self._board.points if p.is_occupied]
+        percent_board_filled = float(sum(occupied_points)) / float(len(occupied_points)) if len(
+            occupied_points) > 0 else 0
 
         # TODO: Calculate the value better
-        territory_value = pow(territory_size, 2) / pow(territory_cost, 2) if territory_cost > 0 else 0
+        territory_value = (float(territory_size) / percent_board_filled
+                           if percent_board_filled > 0
+                           else float(territory_size))
 
         # TODO: Choose point needed better and factor into value
         return territory_value, points_needed[0]
@@ -260,5 +271,6 @@ class ComputerPlayer(object):
         if not coords_needed:
             return []
 
-        territory_group = Group(points=[self._board.get_point(coordinates=[x, y]) for x, y in coords_needed])
+        territory_group = Group(points=[self._board.get_point(coordinates=[x, y]) for x, y in coords_needed],
+                                auto_find=False)
         return territory_group.liberties

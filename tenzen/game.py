@@ -20,7 +20,7 @@ class BaseGame(object):
 
         self.turn_color = Color.black
         self.board = None
-        self.past_boards = []
+        self.past_boards = tuple()
         self.board_states = set()
         self.last_player_passed = False
 
@@ -86,14 +86,17 @@ class BaseGame(object):
         self.current_move = None
 
     def _setup_turn(self):
-        self.past_boards.append(self.board.clone())
+        past_boards = list(self.past_boards)
+        past_boards.append(self.board.clone())
+        self.past_boards = tuple(past_boards)
 
     def _place_stone(self):
         try:
-            self.current_move = ComputerPlayer(self.board,
-                                               self.turn_color,
-                                               self._get_opponent_color(),
-                                               tuple(self.invalid_moves)).play()
+            self.current_move = ComputerPlayer(board=self.board,
+                                               past_boards=self.past_boards,
+                                               player_color=self.turn_color,
+                                               opponent_color=self._get_opponent_color(),
+                                               invalid_moves=tuple(self.invalid_moves)).play()
         except PassTurn:
             if self.last_player_passed:
                 raise GameOver()
@@ -109,7 +112,9 @@ class BaseGame(object):
     def _complete_turn(self):
         new_board_state = self.board.get_state()
         if new_board_state in self.board_states:
-            self.board = self.past_boards.pop(-1)
+            past_boards = list(self.past_boards)
+            self.board = past_boards.pop(-1)
+            self.past_boards = tuple(past_boards)
             raise SuperKo()
         else:
             self.board_states.add(new_board_state)
@@ -125,7 +130,7 @@ class SimulatedGame(BaseGame):
 
         print('\n'.join([
             '',
-            'Turn %s' % (len(self.past_boards) + 1),
+            'Turn %s' % len(self.past_boards),
             '',
             str(self.board),
             '',
@@ -155,10 +160,11 @@ class UserGame(BaseGame):
             if self.turn_color == self.user_color:
                 self._place_user_stone()
             else:
-                self.current_move = ComputerPlayer(self.board,
-                                                   self.turn_color,
-                                                   self._get_opponent_color(),
-                                                   tuple(self.invalid_moves)).play()
+                self.current_move = ComputerPlayer(board=self.board,
+                                                   past_boards=self.past_boards,
+                                                   player_color=self.turn_color,
+                                                   opponent_color=self._get_opponent_color(),
+                                                   invalid_moves=tuple(self.invalid_moves)).play()
         except PassTurn:
             if self.last_player_passed:
                 raise GameOver()

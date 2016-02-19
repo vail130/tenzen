@@ -74,3 +74,6 @@ class Point(object):
             return self.territory_color.name[0].lower()
 
         return '.'
+
+    def __repr__(self):
+        return '<tenzen.point.Point at (%s, %s) [%s]>' % (self.x, self.y, self.color)
